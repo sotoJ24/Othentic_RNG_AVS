@@ -1,56 +1,38 @@
 #!/bin/bash
 
-# Load environment variables from .env.example (or a proper .env file)
-# Make sure to fill these in your .env or set them directly in your shell
-# Example: export RPC_URL="http://localhost:8545"
-# Example: export PRIVATE_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-# Example: export RNG_REGISTRY_ADDRESS="0x5FbDB2315678afecb367f032d93F642f64180aa3" # From your DeployRNG.s.sol output
-# Example: export STAKING_TOKEN_ADDRESS="0x0000000000000000000000000000000000000001" # From your DeployRNG.s.sol
+# register-operator.sh
+# This script "deploys" (runs) the Rust RNG operator backend.
+# In a real AVS, this might also involve an on-chain registration
+# transaction to an Operator Registry smart contract.
 
-# Check if required environment variables are set
-if [ -z "$RPC_URL" ] || [ -z "$PRIVATE_KEY" ] || [ -z "$RNG_REGISTRY_ADDRESS" ] || [ -z "$STAKING_TOKEN_ADDRESS" ]; then
-  echo "Error: Missing required environment variables (RPC_URL, PRIVATE_KEY, RNG_REGISTRY_ADDRESS, STAKING_TOKEN_ADDRESS)."
-  echo "Please set them in your shell or in a .env file."
-  exit 1
+OPERATOR_DIR="$(dirname "$0")/operator" # Assumes script is run from project root or similar
+
+echo "--- Registering/Deploying RNG Operator Backend ---"
+
+# Navigate to the operator directory
+if [ -d "$OPERATOR_DIR" ]; then
+    echo "Navigating to operator directory: $OPERATOR_DIR"
+    cd "$OPERATOR_DIR" || { echo "Failed to change directory to $OPERATOR_DIR"; exit 1; }
+else
+    echo "Error: Operator directory '$OPERATOR_DIR' not found."
+    exit 1
 fi
 
-echo "--- Registering Operator ---"
-echo "RPC URL: $RPC_URL"
-echo "RNG Registry Address: $RNG_REGISTRY_ADDRESS"
-echo "Staking Token Address: $STAKING_TOKEN_ADDRESS"
+# Build the Rust operator in release mode for performance
+echo "Building Rust operator..."
+cargo build --release || { echo "Rust operator build failed!"; exit 1; }
+echo "Rust operator built successfully."
 
-# --- Operator Parameters ---
-# These should match the requirements of your RNGRegistry contract's registerOperator function
-METADATA_URI="ipfs://QmVyGvF3GvF3GvF3GvF3GvF3GvF3GvF3GvF3GvF3GvF3Gv" # Example IPFS URI
-DELEGATION_APPROVER="0x0000000000000000000000000000000000000000" # Example: address(0) if not used, or a specific address
-STAKE_AMOUNT="1000000000000000000" # 1 token (1 ether in wei) - must be >= minOperatorStake in RNGRegistry
+# Run the compiled operator binary
+# In a production environment, you would typically use a process manager (e.g., systemd, supervisor)
+# to keep this running reliably in the background.
+echo "Running RNG operator..."
+# Using `exec` replaces the current shell process with the Rust program,
+# which is suitable for a long-running service.
+# For a simple run-and-exit, just `cargo run --release` is fine.
+# We'll use `cargo run --release` for simplicity in this example,
+# as the current Rust app runs and exits after one attestation cycle.
+cargo run --release
 
-# --- Step 1: Approve the RNGRegistry to spend staking tokens ---
-# The operator needs to approve the RNGRegistry contract to pull the stakeAmount from their wallet.
-echo "Approving RNGRegistry to spend $STAKE_AMOUNT wei of staking token..."
-cast send \
-  --rpc-url "$RPC_URL" \
-  --private-key "$PRIVATE_KEY" \
-  "$STAKING_TOKEN_ADDRESS" \
-  "approve(address,uint256)" \
-  "$RNG_REGISTRY_ADDRESS" \
-  "$STAKE_AMOUNT" \
-  --json # Output as JSON for easier parsing if needed, or remove for simpler output
-
-echo "Approval transaction sent. Waiting for confirmation..."
-# You might want to add a sleep or a check for transaction confirmation here in a real script.
-
-# --- Step 2: Call registerOperator on RNGRegistry ---
-echo "Calling registerOperator on RNGRegistry..."
-cast send \
-  --rpc-url "$RPC_URL" \
-  --private-key "$PRIVATE_KEY" \
-  "$RNG_REGISTRY_ADDRESS" \
-  "registerOperator(string,address,uint256)" \
-  "$METADATA_URI" \
-  "$DELEGATION_APPROVER" \
-  "$STAKE_AMOUNT" \
-  --json # Output as JSON for easier parsing if needed, or remove for simpler output
-
-echo "Register operator transaction sent. Check blockchain explorer for status."
-echo "--- Operator Registration Complete ---"
+echo "RNG Operator execution finished."
+echo "------------------------------------------"
