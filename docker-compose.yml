@@ -1,0 +1,21 @@
+operator:
+  address: "0x..."
+  private_key: "0x..."
+  
+network:
+  rpc_url: "https://your-rpc-endpoint"
+  chain_id: 1337
+  
+contracts:
+  task_manager: "0x..."
+  registry: "0x..."
+  
+performance:
+  task_interval: "30s"
+  batch_size: 10
+  
+entropy:
+  sources:
+    - "hardware"
+    - "atmospheric"
+    - "blockchain"
