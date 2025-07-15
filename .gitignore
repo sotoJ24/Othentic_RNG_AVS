@@ -15,6 +15,9 @@ out/
 .nuxt/ # For Nuxt.js projects
 .svelte-kit/ # For SvelteKit projects
 
+# OpenZeppelin
+cd contracts/lib/openzeppelin-contracts
+
 # Environment variables
 .env
 .env.local

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
+import "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import "../lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
+
 
 /**
  * @title RNGTaskManager
@@ -84,7 +86,6 @@ contract RNGTaskManager is Ownable, ReentrancyGuard {
     
     event OperatorRegistered(address indexed operator, uint256 stake);
     event OperatorSlashed(address indexed operator, uint256 amount);
-    event TaskFailed(uint256 indexed taskId, string reason);
 
     // Modifiers
     modifier onlyActiveOperator() {
@@ -105,18 +106,22 @@ contract RNGTaskManager is Ownable, ReentrancyGuard {
         _;
     }
 
+    // Corrected Constructor:
+    // Explicitly call Ownable() with msg.sender as the initial owner
+    // and ReentrancyGuard() constructors
     constructor(
         uint256 _minStake,
         uint256 _taskFee,
         uint256 _slashAmount,
         uint256 _maxTasksPerBlock,
         uint256 _taskTimeout
-    ) {
+    ) Ownable(msg.sender) ReentrancyGuard() { 
         minStake = _minStake;
         taskFee = _taskFee;
         slashAmount = _slashAmount;
         maxTasksPerBlock = _maxTasksPerBlock;
         taskTimeout = _taskTimeout;
+        nextTaskId = 0; 
     }
 
     /**
@@ -156,7 +161,6 @@ contract RNGTaskManager is Ownable, ReentrancyGuard {
         bytes32 seed = keccak256(
             abi.encodePacked(
                 block.timestamp,
-                block.difficulty,
                 msg.sender,
                 taskId
             )
@@ -257,8 +261,7 @@ contract RNGTaskManager is Ownable, ReentrancyGuard {
      * @dev Slash an operator for malicious behavior
      */
     function slashOperator(
-        address operator,
-        string calldata reason
+        address operator
     ) external onlyOwner {
         require(operators[operator].isActive, "Operator not active");
         require(operators[operator].stake >= slashAmount, "Insufficient stake");

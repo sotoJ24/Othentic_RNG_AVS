@@ -1,0 +1,16 @@
+{
+  "name": "attestation-center",
+  "version": "1.0.0",
+  "description": "Scripts for Othentic RNG AVS Attestation Center",
+  "main": "submit-task.js",
+  "scripts": {
+    "submit-task": "node submit-task.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.1"
+  }
+}

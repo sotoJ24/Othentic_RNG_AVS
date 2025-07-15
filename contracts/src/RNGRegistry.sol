@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "../lib/openzeppelin-contracts/contracts/access/Ownable.sol";
+import "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
+import "../lib/openzeppelin-contracts/contracts/utils/cryptography/ECDSA.sol";
+import "../lib/openzeppelin-contracts/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title RNGRegistry
@@ -54,8 +54,11 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
         uint256 operatorRewards;
         uint256 delegatorRewards;
         uint256 distributionBlock;
-        mapping(address => uint256) operatorShares;
-        mapping(address => uint256) delegatorShares;
+        // Mappings within structs are not directly supported for storage in Solidity.
+        // These would need to be moved to state variables or handled differently.
+        // For now, commenting out to avoid compilation errors.
+        // mapping(address => uint256) operatorShares;
+        // mapping(address => uint256) delegatorShares;
     }
 
     // Enums
@@ -72,7 +75,7 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
     mapping(address => address[]) public operatorToDelegators;
     mapping(address => mapping(address => Delegator)) public delegations;
     mapping(uint256 => SlashingEvent) public slashingEvents;
-    mapping(uint256 => RewardDistribution) public rewardDistributions;
+    mapping(uint256 => RewardDistribution) public rewardDistributions; // This mapping will have issues due to RewardDistribution struct
     mapping(address => bool) public authorizedSlashers;
     mapping(address => uint256) public operatorIndex;
     
@@ -153,6 +156,9 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
         _;
     }
 
+    // Corrected Constructor:
+    // Explicitly call Ownable() with msg.sender as the initial owner
+    // and ReentrancyGuard() constructors
     constructor(
         address _stakingToken,
         uint256 _minOperatorStake,
@@ -161,7 +167,7 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
         uint256 _slashingDelay,
         uint256 _withdrawalDelay,
         uint256 _operatorCommission
-    ) {
+    ) Ownable(msg.sender) ReentrancyGuard() { // <-- Added calls to base constructors here
         stakingToken = IERC20(_stakingToken);
         minOperatorStake = _minOperatorStake;
         minDelegatorStake = _minDelegatorStake;
@@ -169,6 +175,9 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
         slashingDelay = _slashingDelay;
         withdrawalDelay = _withdrawalDelay;
         operatorCommission = _operatorCommission;
+        nextSlashingId = 0; // Initialize nextSlashingId
+        nextRewardId = 0; // Initialize nextRewardId
+        totalStaked = 0; // Initialize totalStaked
     }
 
     /**
@@ -369,18 +378,23 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
         // Slash delegator stakes proportionally
         if (delegatorSlash > 0) {
             address[] memory delegatorAddresses = operatorToDelegators[slashing.operator];
-            uint256 totalDelegatorStake = operator.totalStake - operator.stakedAmount;
+            uint256 totalDelegatorStake = operator.totalStake - operator.stakedAmount; // This will be the operator's *remaining* totalStake after their portion is slashed
             
-            for (uint256 i = 0; i < delegatorAddresses.length; i++) {
-                address delegatorAddr = delegatorAddresses[i];
-                Delegator storage delegator = delegations[slashing.operator][delegatorAddr];
-                
-                if (delegator.isActive && delegator.stakedAmount > 0) {
-                    uint256 delegatorSlashAmount = (delegatorSlash * delegator.stakedAmount) / totalDelegatorStake;
-                    delegator.stakedAmount -= delegatorSlashAmount;
-                    delegator.shares -= delegatorSlashAmount;
-                    operator.totalStake -= delegatorSlashAmount;
-                    totalStaked -= delegatorSlashAmount;
+            // Check to prevent division by zero if totalDelegatorStake becomes 0
+            if (totalDelegatorStake > 0) {
+                for (uint256 i = 0; i < delegatorAddresses.length; i++) {
+                    address delegatorAddr = delegatorAddresses[i];
+                    Delegator storage delegator = delegations[slashing.operator][delegatorAddr];
+                    
+                    if (delegator.isActive && delegator.stakedAmount > 0) {
+                        uint256 delegatorSlashAmount = (delegatorSlash * delegator.stakedAmount) / totalDelegatorStake;
+                        delegator.stakedAmount -= delegatorSlashAmount;
+                        delegator.shares -= delegatorSlashAmount;
+                        // operator.totalStake is already updated by the operatorSlash portion and will be updated here by the delegatorSlash portion
+                        // totalStaked is also updated by the operatorSlash portion and will be updated here by the delegatorSlash portion
+                        operator.totalStake -= delegatorSlashAmount; // Update operator's total stake for delegator portion
+                        totalStaked -= delegatorSlashAmount; // Update overall total staked
+                    }
                 }
             }
         }
@@ -415,14 +429,15 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
         distribution.distributionBlock = block.number;
         
         // Calculate rewards per operator based on performance
-        uint256 activeOperators = 0;
+        uint256 activeOperatorsCount = 0; // Renamed to avoid conflict with enum
         for (uint256 i = 0; i < operatorList.length; i++) {
             if (operators[operatorList[i]].isActive) {
-                activeOperators++;
+                activeOperatorsCount++;
             }
         }
         
-        uint256 baseRewardPerOperator = totalRewardAmount / activeOperators;
+        require(activeOperatorsCount > 0, "No active operators to reward");
+        uint256 baseRewardPerOperator = totalRewardAmount / activeOperatorsCount;
         
         // Distribute rewards
         for (uint256 i = 0; i < operatorList.length; i++) {
@@ -442,25 +457,27 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
                 // Distribute to delegators proportionally
                 if (delegatorReward > 0) {
                     address[] memory delegatorAddresses = operatorToDelegators[operatorAddr];
-                    uint256 totalDelegatorStake = operator.totalStake - operator.stakedAmount;
+                    uint256 totalDelegatorStakeForOperator = operator.totalStake - operator.stakedAmount; // Total delegated stake for this specific operator
                     
-                    for (uint256 j = 0; j < delegatorAddresses.length; j++) {
-                        address delegatorAddr = delegatorAddresses[j];
-                        Delegator storage delegator = delegations[operatorAddr][delegatorAddr];
-                        
-                        if (delegator.isActive && delegator.stakedAmount > 0) {
-                            uint256 delegatorRewardAmount = (delegatorReward * delegator.stakedAmount) / totalDelegatorStake;
-                            delegator.stakedAmount += delegatorRewardAmount;
-                            delegator.shares += delegatorRewardAmount;
-                            operator.totalStake += delegatorRewardAmount;
-                            totalStaked += delegatorRewardAmount;
+                    if (totalDelegatorStakeForOperator > 0) { // Prevent division by zero
+                        for (uint256 j = 0; j < delegatorAddresses.length; j++) {
+                            address delegatorAddr = delegatorAddresses[j];
+                            Delegator storage delegator = delegations[operatorAddr][delegatorAddr];
+                            
+                            if (delegator.isActive && delegator.stakedAmount > 0) {
+                                uint256 delegatorRewardAmount = (delegatorReward * delegator.stakedAmount) / totalDelegatorStakeForOperator;
+                                delegator.stakedAmount += delegatorRewardAmount;
+                                delegator.shares += delegatorRewardAmount;
+                                operator.totalStake += delegatorRewardAmount;
+                                totalStaked += delegatorRewardAmount;
+                            }
                         }
                     }
                 }
             }
         }
         
-        emit RewardsDistributed(rewardId, totalRewardAmount, activeOperators);
+        emit RewardsDistributed(rewardId, totalRewardAmount, activeOperatorsCount);
     }
 
     /**
@@ -510,6 +527,8 @@ contract RNGRegistry is Ownable, ReentrancyGuard {
                 activeOperators[index] = operatorList[i];
                 index++;
             }
+            // If an operator becomes inactive, ensure they are not added to the list
+            // This is just a view function, so it reflects current state
         }
         
         return activeOperators;
